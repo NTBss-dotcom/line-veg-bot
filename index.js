@@ -10,7 +10,7 @@ const config = {
 const client = new line.Client(config);
 const app = express();
 
-// 俗名對照表
+// 常見俗名對照表
 const CROP_MAP = {
   '高麗菜': '甘藍',
   '地瓜': '甘薯',
@@ -45,7 +45,7 @@ async function handleEvent(event) {
     replyText = await getVegPrice(userText);
   } catch (err) {
     console.error('查詢過程發生錯誤:', err);
-    replyText = '抱歉，系統查詢時發生錯誤，請稍後再試。';
+    replyText = '系統查詢時發生錯誤，請稍後再試。';
   }
 
   return client.replyMessage(event.replyToken, {
@@ -58,41 +58,40 @@ async function getVegPrice(userInput) {
   const targetName = CROP_MAP[userInput] || userInput;
 
   try {
-    const url = 'https://data.moa.gov.tw/api/v1/AgriProductsTransType/';
+    // 改用開放資料平臺最穩定的蔬菜交易 JSON 資料源
+    const url = 'https://data.moa.gov.tw/Service/OpenData/FromM/FarmTransData.aspx';
     
-    // 模擬一般瀏覽器發送請求，防止被農業部 API 阻擋
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-        'Accept': 'application/json'
-      },
-      timeout: 8000
-    });
+    const response = await axios.get(url, { timeout: 10000 });
+    const allData = response.data;
 
-    const allData = response.data.RSData || [];
-
-    if (allData.length === 0) {
-      return '農業部開放資料平臺目前維護中，暫無最新資料。';
+    if (!Array.isArray(allData) || allData.length === 0) {
+      return '目前無法取得批發市場行情資料，請稍後再試。';
     }
 
-    // 在本機伺服器端過濾含有關鍵字的資料
+    // 篩選包含關鍵字的作物資料
     const matches = allData.filter(item => 
       item.CropName && (item.CropName.includes(targetName) || item.CropName.includes(userInput))
     );
 
     if (matches.length === 0) {
-      // 隨機列出當前資料庫有的 3 個作物名稱給用戶參考
-      const sampleCrops = [...new Set(allData.map(i => i.CropName))].slice(0, 3).join('、');
-      return `查無「${userInput}」的行情資料。\n\n目前資料庫中有資料的作物範例：\n${sampleCrops}\n\n請嘗試輸入上方範例名稱！`;
+      // 若查無資料，隨機抓 3 個當前有資料的品項範例給用戶
+      const sampleCrops = [...new Set(allData.map(i => i.CropName))].filter(Boolean).slice(0, 3).join('、');
+      return `查無「${userInput}」目前的批發價格。\n\n💡 有資料的作物範例：\n${sampleCrops}\n\n請試著輸入上述名稱！`;
     }
 
     const realCropName = matches[0].CropName;
-    let msg = `🥬 【${realCropName}】最新市場行情：\n-------------------------\n`;
+    let msg = `🥬 【${realCropName}】最新批發市場行情：\n-------------------------\n`;
     
+    // 取前 5 筆市場資料
     matches.slice(0, 5).forEach((item) => {
-      msg += `📍 市場：${item.MarketName}\n`;
-      msg += `💰 平均價：${item.Avg_Price} 元/公斤\n`;
-      msg += `📈 上價：${item.Upper_Price} | 📉 下價：${item.Lower_Price}\n`;
+      const market = item.MarketName || '未知市場';
+      const avg = item.Avg_Price || '-';
+      const upper = item.Upper_Price || '-';
+      const lower = item.Lower_Price || '-';
+      
+      msg += `📍 市場：${market}\n`;
+      msg += `💰 平均價：${avg} 元/公斤\n`;
+      msg += `📈 上價：${upper} | 📉 下價：${lower}\n`;
       msg += `-------------------------\n`;
     });
 
@@ -100,7 +99,7 @@ async function getVegPrice(userInput) {
 
   } catch (error) {
     console.error('API 呼叫失敗:', error.message);
-    return '連線至農業部資料庫逾時或失敗，請稍後再試。';
+    return '無法連線至行情資料庫，請稍後再試。';
   }
 }
 
