@@ -30,8 +30,6 @@ app.get('/', (req, res) => {
 });
 
 app.post('/callback', line.middleware(config), (req, res) => {
-  console.log('>>> 收到 LINE 訊息請求 <<<');
-
   Promise.all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
     .catch((err) => {
@@ -46,7 +44,7 @@ async function handleEvent(event) {
   }
 
   const userText = event.message.text.trim();
-  console.log(`用戶查詢關鍵字: ${userText}`);
+  console.log(`收到查詢要求: ${userText}`);
 
   const client = new line.Client(config);
   let replyText = '';
@@ -54,8 +52,8 @@ async function handleEvent(event) {
   try {
     replyText = await getVegPrice(userText);
   } catch (err) {
-    console.error('查詢過程發生錯誤:', err);
-    replyText = '系統查詢行情時發生錯誤，請稍後再試。';
+    console.error('處理查詢時發生例外錯誤:', err);
+    replyText = '系統處理資料時發生錯誤，請稍後再試。';
   }
 
   return client.replyMessage(event.replyToken, {
@@ -65,46 +63,52 @@ async function handleEvent(event) {
 }
 
 async function getVegPrice(userInput) {
-  // 自動轉換俗名 (例如: 高麗菜 -> 甘藍)
   const targetName = CROP_MAP[userInput] || userInput;
+  const url = `https://data.moa.gov.tw/api/v1/AgriProductsTransType/?$filter=CropName+like+${encodeURIComponent(targetName)}`;
 
   try {
-    // 使用支援 $filter 條件查詢的 API 端點，大幅縮減資料傳輸量
-    const url = `https://data.moa.gov.tw/api/v1/AgriProductsTransType/?$filter=CropName+like+${encodeURIComponent(targetName)}`;
-    
-    console.log(`發送輕量 API 請求: ${url}`);
     const response = await axios.get(url, { timeout: 8000 });
-    const resultData = response.data;
+    const resData = response.data;
 
-    const matches = resultData.RSData || [];
-
-    if (!Array.isArray(matches) || matches.length === 0) {
-      return `查無「${userInput}」（學名：${targetName}）最新的批發市場價格。\n\n💡 說明：\n1. 若逢週一/市場休市，當天可能無資料。\n2. 建議嘗試搜尋其他熱門品項，如：甘藍、蘿蔔、香蕉、鳳梨。`;
+    // 自動相容不同的 API 回傳結構 (RSData 或是直接的陣列)
+    let matches = [];
+    if (resData && resData.RSData) {
+      matches = resData.RSData;
+    } else if (Array.isArray(resData)) {
+      matches = resData;
     }
 
-    const realCropName = matches[0].CropName || targetName;
+    console.log(`查詢結果筆數: ${matches.length}`);
+
+    if (!matches || matches.length === 0) {
+      return `查無「${userInput}」（學名：${targetName}）的批發行情。\n\n提示：若逢週一休市可能無資料，請試試輸入：甘藍、蘿蔔、香蕉。`;
+    }
+
+    // 取得資料顯示名稱，相容大小寫欄位
+    const realCropName = matches[0].CropName || matches[0].cropName || targetName;
     let msg = `🥬 【${realCropName}】最新批發市場行情：\n-------------------------\n`;
-    
-    // 取前 5 筆市場資料
-    matches.slice(0, 5).forEach((item) => {
-      const market = item.MarketName || '未知市場';
-      const avg = item.Avg_Price || '-';
-      const upper = item.Upper_Price || '-';
-      const lower = item.Lower_Price || '-';
-      
+
+    // 格式化前 5 筆市場價格資訊
+    const list = matches.slice(0, 5);
+    for (const item of list) {
+      const market = item.MarketName || item.marketName || '批發市場';
+      const avg = item.Avg_Price || item.avg_Price || item.AvgPrice || '-';
+      const upper = item.Upper_Price || item.upper_Price || item.UpperPrice || '-';
+      const lower = item.Lower_Price || item.lower_Price || item.LowerPrice || '-';
+
       msg += `📍 市場：${market}\n`;
       msg += `💰 平均價：${avg} 元/公斤\n`;
       msg += `📈 上價：${upper} | 📉 下價：${lower}\n`;
       msg += `-------------------------\n`;
-    });
+    }
 
     return msg;
 
   } catch (error) {
-    console.error('API 呼叫失敗原因:', error.message);
-    return '連線至農業部資料庫逾時，請稍後再試。';
+    console.error('API 請求失敗:', error.message);
+    return `無法連線至農業部資料庫（${error.message}），請稍後再試。`;
   }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
