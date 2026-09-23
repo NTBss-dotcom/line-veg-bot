@@ -70,31 +70,33 @@ async function getVegPrice(userInput) {
     const response = await axios.get(url, { timeout: 8000 });
     const resData = response.data;
 
-    // 自動相容不同的 API 回傳結構 (RSData 或是直接的陣列)
+    // 精準對應你提供的 Data 陣列，並備用相容其他結構
     let matches = [];
-    if (resData && resData.RSData) {
+    if (resData && Array.isArray(resData.Data)) {
+      matches = resData.Data;
+    } else if (resData && Array.isArray(resData.RSData)) {
       matches = resData.RSData;
     } else if (Array.isArray(resData)) {
       matches = resData;
     }
 
-    console.log(`查詢結果筆數: ${matches.length}`);
+    console.log(`成功解析資料，共找到 ${matches.length} 筆`);
 
     if (!matches || matches.length === 0) {
-      return `查無「${userInput}」（學名：${targetName}）的批發行情。\n\n提示：若逢週一休市可能無資料，請試試輸入：甘藍、蘿蔔、香蕉。`;
+      return `查無「${userInput}」（學名：${targetName}）最新的批發行情。\n\n提示：若逢週一休市可能無資料，請嘗試搜尋其他熱門品項，如：甘藍、蘿蔔、香蕉、椰子。`;
     }
 
-    // 取得資料顯示名稱，相容大小寫欄位
-    const realCropName = matches[0].CropName || matches[0].cropName || targetName;
-    let msg = `🥬 【${realCropName}】最新批發市場行情：\n-------------------------\n`;
+    const realCropName = matches[0].CropName || targetName;
+    const transDate = matches[0].TransDate || '';
+    let msg = `🥬 【${realCropName}】最新批發市場行情 ${transDate}：\n-------------------------\n`;
 
-    // 格式化前 5 筆市場價格資訊
+    // 取前 5 筆市場資料整理成文字卡片
     const list = matches.slice(0, 5);
     for (const item of list) {
-      const market = item.MarketName || item.marketName || '批發市場';
-      const avg = item.Avg_Price || item.avg_Price || item.AvgPrice || '-';
-      const upper = item.Upper_Price || item.upper_Price || item.UpperPrice || '-';
-      const lower = item.Lower_Price || item.lower_Price || item.LowerPrice || '-';
+      const market = item.MarketName || '批發市場';
+      const avg = item.Avg_Price !== undefined ? item.Avg_Price : '-';
+      const upper = item.Upper_Price !== undefined ? item.Upper_Price : '-';
+      const lower = item.Lower_Price !== undefined ? item.Lower_Price : '-';
 
       msg += `📍 市場：${market}\n`;
       msg += `💰 平均價：${avg} 元/公斤\n`;
