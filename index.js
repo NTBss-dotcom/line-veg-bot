@@ -63,34 +63,46 @@ async function handleEvent(event) {
 }
 
 async function getVegPrice(userInput) {
+  // 自動將俗名轉為學名（例如：高麗菜 -> 甘藍）
   const targetName = CROP_MAP[userInput] || userInput;
-  const url = `https://data.moa.gov.tw/api/v1/AgriProductsTransType/?$filter=CropName+like+${encodeURIComponent(targetName)}`;
 
   try {
-    const response = await axios.get(url, { timeout: 8000 });
+    // 使用 axios params 自動處理網址參數與 UTF-8 編碼，避免篩選條件失效
+    const url = 'https://data.moa.gov.tw/api/v1/AgriProductsTransType/';
+    const response = await axios.get(url, {
+      params: {
+        Crop: targetName
+      },
+      timeout: 8000
+    });
+
     const resData = response.data;
 
-    // 精準對應你提供的 Data 陣列，並備用相容其他結構
-    let matches = [];
+    let rawMatches = [];
     if (resData && Array.isArray(resData.Data)) {
-      matches = resData.Data;
+      rawMatches = resData.Data;
     } else if (resData && Array.isArray(resData.RSData)) {
-      matches = resData.RSData;
+      rawMatches = resData.RSData;
     } else if (Array.isArray(resData)) {
-      matches = resData;
+      rawMatches = resData;
     }
 
-    console.log(`成功解析資料，共找到 ${matches.length} 筆`);
+    // 在伺服器端二次嚴格過濾，確保資料名稱確實包含使用者查詢的作物
+    const matches = rawMatches.filter(item => 
+      item.CropName && (item.CropName.includes(targetName) || item.CropName.includes(userInput))
+    );
+
+    console.log(`查詢「${targetName}」成功，篩選後共 ${matches.length} 筆`);
 
     if (!matches || matches.length === 0) {
-      return `查無「${userInput}」（學名：${targetName}）最新的批發行情。\n\n提示：若逢週一休市可能無資料，請嘗試搜尋其他熱門品項，如：甘藍、蘿蔔、香蕉、椰子。`;
+      return `查無「${userInput}」（學名：${targetName}）最新的批發行情。\n\n💡 提示：若逢週一/休市可能無資料，請試試輸入：甘藍、香蕉、鳳梨、蘿蔔。`;
     }
 
     const realCropName = matches[0].CropName || targetName;
     const transDate = matches[0].TransDate || '';
-    let msg = `🥬 【${realCropName}】最新批發市場行情 ${transDate}：\n-------------------------\n`;
+    let msg = `🥬 【${realCropName}】最新批發市場行情 (${transDate})：\n-------------------------\n`;
 
-    // 取前 5 筆市場資料整理成文字卡片
+    // 取前 5 筆市場資料
     const list = matches.slice(0, 5);
     for (const item of list) {
       const market = item.MarketName || '批發市場';
