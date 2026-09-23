@@ -14,7 +14,7 @@ app.post('/callback', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
     .catch((err) => {
-      console.error('Webhook Error:', err);
+      console.error('LINE API 錯誤:', err);
       res.status(500).end();
     });
 });
@@ -25,7 +25,14 @@ async function handleEvent(event) {
   }
 
   const userText = event.message.text.trim();
-  const replyText = await getVegPrice(userText);
+  let replyText = '';
+
+  try {
+    replyText = await getVegPrice(userText);
+  } catch (err) {
+    console.error('查詢過程發生錯誤:', err);
+    replyText = '抱歉，系統查詢時發生錯誤，請稍後再試。';
+  }
 
   return client.replyMessage(event.replyToken, {
     type: 'text',
@@ -53,8 +60,8 @@ async function getVegPrice(cropName) {
 
     return msg;
   } catch (error) {
-    console.error('API Request Error:', error);
-    return '資料庫無回應，請稍後再試。';
+    console.error('農業部 API 呼叫失敗:', error);
+    return '無法連線至農業部資料庫，請稍後再試。';
   }
 }
 
