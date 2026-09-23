@@ -25,12 +25,10 @@ const CROP_MAP = {
   '香蕉': '香蕉'
 };
 
-// 根目錄測試點
 app.get('/', (req, res) => {
   res.send('LINE 農產品價格查詢機器人運作中！');
 });
 
-// Webhook 接收點
 app.post('/callback', line.middleware(config), (req, res) => {
   console.log('>>> 收到 LINE 訊息請求 <<<');
 
@@ -71,32 +69,23 @@ async function getVegPrice(userInput) {
   const targetName = CROP_MAP[userInput] || userInput;
 
   try {
-    // 農業部開放資料平臺最穩定的 FarmTransData API 端點
-    const url = 'https://data.moa.gov.tw/Service/OpenData/FromM/FarmTransData.aspx';
+    // 使用支援 $filter 條件查詢的 API 端點，大幅縮減資料傳輸量
+    const url = `https://data.moa.gov.tw/api/v1/AgriProductsTransType/?$filter=CropName+like+${encodeURIComponent(targetName)}`;
     
-    console.log(`發送 API 請求查詢: ${targetName}`);
-    const response = await axios.get(url, { timeout: 10000 });
-    const allData = response.data;
+    console.log(`發送輕量 API 請求: ${url}`);
+    const response = await axios.get(url, { timeout: 8000 });
+    const resultData = response.data;
 
-    if (!Array.isArray(allData) || allData.length === 0) {
-      return '目前農業部資料庫維護中，暫無法取得批發市場行情。';
+    const matches = resultData.RSData || [];
+
+    if (!Array.isArray(matches) || matches.length === 0) {
+      return `查無「${userInput}」（學名：${targetName}）最新的批發市場價格。\n\n💡 說明：\n1. 若逢週一/市場休市，當天可能無資料。\n2. 建議嘗試搜尋其他熱門品項，如：甘藍、蘿蔔、香蕉、鳳梨。`;
     }
 
-    // 篩選包含關鍵字的作物資料
-    const matches = allData.filter(item => 
-      item.CropName && (item.CropName.includes(targetName) || item.CropName.includes(userInput))
-    );
-
-    if (matches.length === 0) {
-      // 若查無資料，隨機抓 3 個當前有資料的品項範例給用戶參考
-      const sampleCrops = [...new Set(allData.map(i => i.CropName))].filter(Boolean).slice(0, 3).join('、');
-      return `查無「${userInput}」目前的批發價格。\n\n💡 提示：可以嘗試輸入以下熱門作物範例：\n${sampleCrops}`;
-    }
-
-    const realCropName = matches[0].CropName;
+    const realCropName = matches[0].CropName || targetName;
     let msg = `🥬 【${realCropName}】最新批發市場行情：\n-------------------------\n`;
     
-    // 取前 5 筆市場資料呈現
+    // 取前 5 筆市場資料
     matches.slice(0, 5).forEach((item) => {
       const market = item.MarketName || '未知市場';
       const avg = item.Avg_Price || '-';
@@ -113,7 +102,7 @@ async function getVegPrice(userInput) {
 
   } catch (error) {
     console.error('API 呼叫失敗原因:', error.message);
-    return '無法連線至農業部行情資料庫，請稍後再試。';
+    return '連線至農業部資料庫逾時，請稍後再試。';
   }
 }
 
